@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Follow one Qwen3 next-token prediction from text to tokens, transformer blocks, logits, and sampling.">
+  <title>One token at a time — Qwen Transformer Notes</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f3efe5;
+      --paper-deep: #e7dfcf;
+      --ink: #20231f;
+      --muted: #68695f;
+      --line: #c8c0af;
+      --red: #a13d2d;
+      --red-soft: #ead4c8;
+      --green: #315c4b;
+      --green-soft: #d7e1d7;
+      --gold: #9a712d;
+      --panel: rgba(255, 253, 247, 0.7);
+      --shadow: 0 18px 48px rgba(55, 45, 30, 0.09);
+      --serif: Georgia, 'Times New Roman', serif;
+      --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+    }
+
+    [data-theme="dark"] {
+      color-scheme: dark;
+      --paper: #1d211e;
+      --paper-deep: #292d28;
+      --ink: #eee9dc;
+      --muted: #b8b5a9;
+      --line: #4b5048;
+      --red: #df8874;
+      --red-soft: #492f29;
+      --green: #95c5ac;
+      --green-soft: #293e34;
+      --gold: #d5ad62;
+      --panel: rgba(29, 33, 30, 0.78);
+      --shadow: 0 18px 48px rgba(0, 0, 0, 0.22);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background:
+        linear-gradient(90deg, transparent 0, transparent calc(50% - 1px), rgba(80, 70, 50, 0.025) 50%, transparent calc(50% + 1px)),
+        var(--paper);
+      color: var(--ink);
+      font-family: var(--serif);
+      font-size: 18px;
+      line-height: 1.68;
+      transition: background 160ms ease, color 160ms ease;
+    }
+
+    button, code, .eyebrow, .label, .shape, .step-number, table { font-family: var(--mono); }
+
+    .progress {
+      position: fixed;
+      inset: 0 auto auto 0;
+      width: 0;
+      height: 3px;
+      background: var(--red);
+      z-index: 20;
+    }
+
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.72rem clamp(1rem, 4vw, 3rem);
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--paper) 88%, transparent);
+      backdrop-filter: blur(12px);
+    }
+
+    .identity {
+      color: var(--ink);
+      font: 600 0.76rem/1 var(--mono);
+      letter-spacing: 0.08em;
+      text-decoration: none;
+      text-transform: uppercase;
+    }
+
+    .header-actions { display: flex; align-items: center; gap: 0.75rem; }
+
+    .chapter-mark { color: var(--muted); font: 0.7rem/1 var(--mono); }
+
+    .theme-toggle {
+      min-width: 4.8rem;
+      padding: 0.38rem 0.58rem;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    main { overflow: hidden; }
+
+    .hero {
+      width: min(1100px, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: clamp(4rem, 10vw, 8rem) 0 clamp(3rem, 7vw, 5rem);
+    }
+
+    .eyebrow {
+      margin: 0 0 1.25rem;
+      color: var(--red);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3 { line-height: 1.08; text-wrap: balance; }
+
+    h1 {
+      max-width: 900px;
+      margin: 0;
+      font-size: clamp(3.2rem, 9vw, 7.4rem);
+      font-weight: 500;
+      letter-spacing: -0.055em;
+    }
+
+    .dek {
+      max-width: 720px;
+      margin: 2rem 0 0;
+      color: var(--muted);
+      font-size: clamp(1.18rem, 2vw, 1.48rem);
+      line-height: 1.5;
+    }
+
+    .hero-rule {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 1rem;
+      align-items: end;
+      margin-top: 3.2rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font: 0.72rem/1.5 var(--mono);
+    }
+
+    article { width: min(760px, calc(100% - 2rem)); margin: 0 auto; }
+
+    section { padding: clamp(3rem, 8vw, 6rem) 0; }
+
+    h2 {
+      margin: 0 0 1.5rem;
+      font-size: clamp(2rem, 5vw, 3.5rem);
+      font-weight: 500;
+      letter-spacing: -0.035em;
+    }
+
+    h3 { margin: 2rem 0 0.7rem; font-size: 1.4rem; }
+
+    p { margin: 0 0 1.25rem; }
+
+    a { color: var(--green); text-underline-offset: 0.2em; }
+
+    code {
+      padding: 0.1em 0.28em;
+      border-radius: 3px;
+      background: var(--paper-deep);
+      font-size: 0.86em;
+    }
+
+    .big-answer {
+      margin: 2.5rem 0;
+      padding: 1.6rem 0 1.6rem 1.5rem;
+      border-left: 4px solid var(--red);
+      font-size: clamp(1.35rem, 3vw, 1.9rem);
+      line-height: 1.42;
+    }
+
+    .callout {
+      margin: 2rem 0;
+      padding: 1.2rem 1.35rem;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .callout .label {
+      display: block;
+      margin-bottom: 0.5rem;
+      color: var(--red);
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .machine {
+      width: min(1120px, calc(100% - 2rem));
+      margin: 2rem auto 0;
+      padding: clamp(1rem, 3vw, 2rem);
+      border: 1px solid var(--line);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .machine-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+      color: var(--muted);
+      font: 0.72rem/1.4 var(--mono);
+    }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(105px, 1fr));
+      gap: 0.45rem;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .pipeline button {
+      width: 100%;
+      min-height: 92px;
+      padding: 0.75rem 0.65rem;
+      color: var(--muted);
+      text-align: left;
+      border: 1px solid var(--line);
+      background: transparent;
+      cursor: pointer;
+      transition: transform 120ms ease, background 120ms ease, color 120ms ease;
+    }
+
+    .pipeline button:hover { transform: translateY(-2px); color: var(--ink); }
+
+    .pipeline button[aria-selected="true"] {
+      color: var(--ink);
+      border-color: var(--red);
+      background: var(--red-soft);
+    }
+
+    .step-number { display: block; margin-bottom: 1.25rem; color: var(--red); font-size: 0.66rem; }
+    .step-name { display: block; font-size: 0.77rem; font-weight: 700; }
+
+    .stage {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.6fr);
+      gap: clamp(1.5rem, 4vw, 4rem);
+      min-height: 310px;
+      padding: clamp(1.5rem, 4vw, 3rem) 0.2rem 1rem;
+    }
+
+    .stage h3 { margin-top: 0; font-size: clamp(1.8rem, 4vw, 3rem); }
+    .stage-copy { max-width: 650px; }
+    .stage-copy p { color: var(--muted); }
+
+    .stage-fact {
+      align-self: start;
+      padding: 1rem;
+      border-top: 3px solid var(--green);
+      background: var(--green-soft);
+    }
+
+    .shape { display: block; margin-bottom: 0.6rem; color: var(--green); font-size: 0.7rem; font-weight: 700; }
+    .fact-value { font-size: 1.05rem; line-height: 1.45; }
+
+    .tokens { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1.4rem 0; }
+
+    .token {
+      display: inline-grid;
+      gap: 0.22rem;
+      padding: 0.52rem 0.68rem;
+      border: 1px solid var(--line);
+      background: var(--paper-deep);
+      font: 0.78rem/1.2 var(--mono);
+    }
+
+    .token small { color: var(--muted); font-size: 0.65rem; }
+
+    .controls { display: flex; gap: 0.6rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+
+    .controls button {
+      padding: 0.55rem 0.85rem;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .controls button.primary { color: var(--paper); border-color: var(--green); background: var(--green); }
+
+    .definition-list { margin: 2rem 0; border-top: 1px solid var(--line); }
+
+    .definition {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 1.5rem;
+      padding: 1.1rem 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .definition dt { color: var(--red); font: 700 0.78rem/1.4 var(--mono); }
+    .definition dd { margin: 0; }
+
+    .wide-section {
+      width: min(1040px, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: clamp(3rem, 8vw, 6rem) 0;
+    }
+
+    .table-wrap { overflow-x: auto; border-top: 2px solid var(--ink); }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.78rem; line-height: 1.45; }
+    th, td { padding: 0.85rem 0.75rem; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; }
+    td:first-child { color: var(--muted); }
+    td:nth-child(3) { color: var(--green); font-weight: 700; }
+
+    .two-pass {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      margin: 2rem 0;
+      border: 1px solid var(--line);
+      background: var(--line);
+    }
+
+    .pass { padding: 1.5rem; background: var(--paper); }
+    .pass .label { color: var(--red); font-size: 0.7rem; }
+    .pass h3 { margin-top: 0.6rem; }
+    .pass p { color: var(--muted); font-size: 0.95rem; }
+
+    .takeaway {
+      margin: 3rem 0 6rem;
+      padding: clamp(1.5rem, 5vw, 3rem);
+      color: var(--paper);
+      background: var(--green);
+    }
+
+    .takeaway h2 { color: inherit; }
+    .takeaway p { max-width: 650px; margin-bottom: 0; font-size: 1.12rem; }
+
+    footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      width: min(1040px, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 1.5rem 0 3rem;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      font: 0.68rem/1.5 var(--mono);
+    }
+
+    @media (max-width: 840px) {
+      body { font-size: 17px; }
+      .pipeline { grid-template-columns: repeat(2, 1fr); }
+      .pipeline li:last-child { grid-column: 1 / -1; }
+      .stage { grid-template-columns: 1fr; min-height: 390px; }
+      .definition { grid-template-columns: 1fr; gap: 0.35rem; }
+      .two-pass { grid-template-columns: 1fr; }
+      .chapter-mark { display: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="progress" aria-hidden="true"></div>
+  <header class="site-header">
+    <a class="identity" href="../../">Qwen Transformer Notes</a>
+    <div class="header-actions">
+      <span class="chapter-mark">01 / the next token</span>
+      <button class="theme-toggle" type="button" aria-label="Toggle color theme">dark mode</button>
+    </div>
+  </header>
+
+  <main>
+    <header class="hero">
+      <p class="eyebrow">Chapter one · inference begins here</p>
+      <h1>One token at a time</h1>
+      <p class="dek">Before attention heads, GPU kernels, or KV caches, there is one simple job to understand: given the text so far, assign a score to every possible next token.</p>
+      <div class="hero-rule">
+        <span>Model under inspection: Qwen3-0.6B</span>
+        <span>Reading time: 9 minutes</span>
+      </div>
+    </header>
+
+    <article>
+      <section>
+        <h2>What does the model actually do?</h2>
+        <p>A language model receives a sequence of token IDs. It runs those IDs through a stack of learned numerical transformations and produces one number for every token in its vocabulary. Those final numbers express which token should plausibly come next.</p>
+        <p class="big-answer">A chat response is not produced in one grand act. It is assembled by repeating one next-token prediction, appending the chosen token, and predicting again.</p>
+        <p>This repeated computation is <strong>inference</strong>: using already-trained parameters to calculate an output. Training discovers the parameters. Inference uses them.</p>
+        <aside class="callout">
+          <span class="label">The central object</span>
+          For this chapter, ignore the whole conversation. Hold onto one object: a list of scores for the next token. Everything before that list exists to compute it; everything after exists to choose from it.
+        </aside>
+      </section>
+    </article>
+
+    <section aria-labelledby="walk-title">
+      <article>
+        <p class="eyebrow">Walk the path</p>
+        <h2 id="walk-title">From a sentence to one choice</h2>
+        <p>Select each stage. The dimensions shown are from Qwen3-0.6B, not generic placeholders.</p>
+      </article>
+
+      <div class="machine">
+        <div class="machine-head">
+          <span>ONE NEXT-TOKEN PREDICTION</span>
+          <span id="stage-counter">STAGE 1 OF 7</span>
+        </div>
+        <ol class="pipeline" aria-label="Inference stages">
+          <li><button type="button" data-stage="0" aria-selected="true"><span class="step-number">01</span><span class="step-name">Text</span></button></li>
+          <li><button type="button" data-stage="1" aria-selected="false"><span class="step-number">02</span><span class="step-name">Tokens</span></button></li>
+          <li><button type="button" data-stage="2" aria-selected="false"><span class="step-number">03</span><span class="step-name">Vectors</span></button></li>
+          <li><button type="button" data-stage="3" aria-selected="false"><span class="step-number">04</span><span class="step-name">28 blocks</span></button></li>
+          <li><button type="button" data-stage="4" aria-selected="false"><span class="step-number">05</span><span class="step-name">Logits</span></button></li>
+          <li><button type="button" data-stage="5" aria-selected="false"><span class="step-number">06</span><span class="step-name">Probabilities</span></button></li>
+          <li><button type="button" data-stage="6" aria-selected="false"><span class="step-number">07</span><span class="step-name">Choice</span></button></li>
+        </ol>
+
+        <div class="stage" aria-live="polite">
+          <div class="stage-copy">
+            <h3 id="stage-title"></h3>
+            <div id="stage-body"></div>
+          </div>
+          <aside class="stage-fact">
+            <span class="shape" id="stage-shape"></span>
+            <div class="fact-value" id="stage-fact"></div>
+          </aside>
+        </div>
+
+        <div class="controls">
+          <button type="button" id="previous">Previous</button>
+          <button type="button" id="next" class="primary">Next stage</button>
+        </div>
+      </div>
+    </section>
+
+    <article>
+      <section>
+        <h2>The words we need</h2>
+        <p>Transformer vocabulary becomes manageable when each term is attached to a concrete object.</p>
+        <dl class="definition-list">
+          <div class="definition">
+            <dt>token</dt>
+            <dd>An item from the model's fixed vocabulary. A token can be a word, part of a word, punctuation, whitespace, or a special control marker.</dd>
+          </div>
+          <div class="definition">
+            <dt>parameter</dt>
+            <dd>A learned number stored in the model file. Parameters are often arranged into matrices called <em>weights</em>. Qwen3-0.6B contains hundreds of millions of them.</dd>
+          </div>
+          <div class="definition">
+            <dt>activation</dt>
+            <dd>A temporary number computed while processing a particular input. Weights persist across requests; activations change with the prompt.</dd>
+          </div>
+          <div class="definition">
+            <dt>hidden state</dt>
+            <dd>The current vector representing a token inside the network. In Qwen3-0.6B, the main hidden state has 1,024 numbers per token.</dd>
+          </div>
+          <div class="definition">
+            <dt>transformer block</dt>
+            <dd>A repeated module with attention and an MLP. Attention lets token representations gather information from earlier positions; the MLP transforms each position independently.</dd>
+          </div>
+          <div class="definition">
+            <dt>logit</dt>
+            <dd>An unnormalized score for one vocabulary token. A larger logit means “more favored,” but it is not yet a probability.</dd>
+          </div>
+          <div class="definition">
+            <dt>sampling</dt>
+            <dd>The policy that turns candidate probabilities into the selected next token. Greedy decoding takes the largest; stochastic methods intentionally preserve some uncertainty.</dd>
+          </div>
+        </dl>
+      </section>
+    </article>
+
+    <section class="wide-section" aria-labelledby="architecture-title">
+      <p class="eyebrow">Why the fork needs real work</p>
+      <h2 id="architecture-title">GPT-2 and Qwen3 share a skeleton, not an anatomy</h2>
+      <p>The original Transformer Explainer is valuable because it makes GPT-2's internals visible. Qwen3 still predicts the next token with decoder blocks, but several organs inside each block have changed.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Part</th><th>GPT-2 small</th><th>Qwen3-0.6B</th><th>Why we care</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Blocks</td><td>12</td><td>28</td><td>The UI must navigate a deeper stack.</td></tr>
+            <tr><td>Hidden size</td><td>768</td><td>1,024</td><td>Every residual-stream token vector is wider.</td></tr>
+            <tr><td>Vocabulary</td><td>50,257</td><td>151,936</td><td>The final projection emits three times as many logits.</td></tr>
+            <tr><td>Position</td><td>Learned vector added to each token</td><td>RoPE rotates queries and keys</td><td>Position moves from the embedding stage into attention.</td></tr>
+            <tr><td>Normalization</td><td>LayerNorm</td><td>RMSNorm</td><td>The formula and intermediate values differ.</td></tr>
+            <tr><td>Attention</td><td>12 query/key/value heads</td><td>16 query heads, 8 key/value heads</td><td>Grouped-query attention shares each K/V head across query heads.</td></tr>
+            <tr><td>MLP</td><td>GELU, width 3,072</td><td>SiLU-gated, width 3,072</td><td>Qwen computes a gate and an up projection before multiplying them.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <aside class="callout">
+        <span class="label">A useful distinction</span>
+        “Transformer” names a family of architectures. It does not imply that every model has identical blocks. Porting the explainer means teaching Qwen's actual operations, not relabeling GPT-2's diagram.
+      </aside>
+    </section>
+
+    <article>
+      <section>
+        <h2>Where an inference engine enters</h2>
+        <p>The mathematical description says “multiply this vector by that weight matrix.” A useful engine must decide where those bytes live, which kernel performs the multiplication, how work is batched, and which intermediate values must survive for the next token.</p>
+        <div class="two-pass">
+          <div class="pass">
+            <span class="label">First</span>
+            <h3>Prefill</h3>
+            <p>Process all prompt tokens, usually in parallel, and build the initial key/value cache. Our five-token example enters together.</p>
+          </div>
+          <div class="pass">
+            <span class="label">Then, repeatedly</span>
+            <h3>Decode</h3>
+            <p>Process one newly selected token while reusing cached keys and values from earlier positions. This avoids recomputing the entire prefix.</p>
+          </div>
+        </div>
+        <p>This is the bridge to <code>llama.cpp</code>. The model defines the operations and learned weights. The engine schedules and executes those operations efficiently on your hardware.</p>
+      </section>
+
+      <section>
+        <div class="takeaway">
+          <h2>Carry this forward</h2>
+          <p>Generation is a loop around next-token prediction. One pass turns token IDs into logits; a sampler chooses one token; the engine appends it and runs the loop again. Next, we will slow down the first two steps and inspect exactly how Qwen turns text into 1,024-number vectors.</p>
+        </div>
+      </section>
+    </article>
+  </main>
+
+  <footer>
+    <span>Qwen Transformer Notes · chapter 01</span>
+    <span>Model dimensions sourced from Qwen3-0.6B config</span>
+  </footer>
+
+  <script>
+    const stages = [
+      {
+        title: 'Begin with text',
+        body: `<p>The input is a string, but the network cannot multiply words. We will use a deliberately plain completion: <strong>“The capital of France is”</strong>.</p><p>At this point there are characters and bytes, but no model vocabulary yet.</p>`,
+        shape: 'INPUT TYPE · STRING',
+        fact: '“The capital of France is”'
+      },
+      {
+        title: 'Tokenize the string',
+        body: `<p>Qwen's tokenizer maps pieces of text to integer IDs. Spaces are part of the token pieces shown below; notice <code>' capital'</code>, not just <code>'capital'</code>.</p><div class="tokens"><span class="token">The<small>ID 785</small></span><span class="token">␠capital<small>ID 6722</small></span><span class="token">␠of<small>ID 315</small></span><span class="token">␠France<small>ID 9625</small></span><span class="token">␠is<small>ID 374</small></span></div><p>Token IDs are labels, not measurements: ID 9,625 is not “larger in meaning” than ID 315.</p>`,
+        shape: 'SHAPE · 5 INTEGER IDs',
+        fact: '[785, 6722, 315, 9625, 374]'
+      },
+      {
+        title: 'Look up vectors',
+        body: `<p>Each ID selects one row from the learned embedding table. The selected row contains 1,024 numbers. Those numbers are the starting hidden state for that token.</p><p>With five tokens, the working object is a matrix with five rows and 1,024 columns. Unlike GPT-2, Qwen does not add a learned position vector here; position enters attention through RoPE.</p>`,
+        shape: 'ACTIVATION SHAPE · 5 × 1,024',
+        fact: 'One 1,024-number hidden state per token'
+      },
+      {
+        title: 'Refine them through 28 blocks',
+        body: `<p>Every block updates every token's hidden state. Attention lets a position gather information from allowed earlier positions. The gated MLP then transforms each position's gathered representation.</p><p>A residual connection adds each transformation back to the running hidden state. That persistent 1,024-wide path is often called the <strong>residual stream</strong>.</p>`,
+        shape: 'DEPTH · 28 DECODER BLOCKS',
+        fact: 'RMSNorm → grouped-query attention → add → RMSNorm → gated MLP → add'
+      },
+      {
+        title: 'Score the vocabulary',
+        body: `<p>After the final block, the hidden state at the last input position is projected into one score per vocabulary entry. These scores are logits.</p><p>The model is not yet emitting text. It has produced a numerical ranking over all candidate token IDs.</p>`,
+        shape: 'OUTPUT SHAPE · 151,936 LOGITS',
+        fact: 'One unnormalized score for every Qwen vocabulary token'
+      },
+      {
+        title: 'Turn scores into a distribution',
+        body: `<p>Softmax transforms logits into non-negative values that sum to one. Temperature and filters such as top-k or top-p can reshape which candidates remain plausible.</p><p>This stage is partly model mathematics and partly decoding policy. The same logits can produce different outputs under different sampler settings.</p>`,
+        shape: 'OUTPUT · 151,936 PROBABILITIES',
+        fact: 'Softmax(logits ÷ temperature)'
+      },
+      {
+        title: 'Choose one, append it, repeat',
+        body: `<p>The sampler selects a token ID. Its text piece is appended to the sequence, and the model predicts the next token again.</p><p>Greedy decoding always picks the highest-probability candidate. Sampling can pick another candidate according to the distribution. Neither changes the trained weights.</p>`,
+        shape: 'LOOP OUTPUT · 1 TOKEN ID',
+        fact: 'The selected token becomes the input to the next decode step'
+      }
+    ];
+
+    const buttons = [...document.querySelectorAll('[data-stage]')];
+    const title = document.querySelector('#stage-title');
+    const body = document.querySelector('#stage-body');
+    const shape = document.querySelector('#stage-shape');
+    const fact = document.querySelector('#stage-fact');
+    const counter = document.querySelector('#stage-counter');
+    const previous = document.querySelector('#previous');
+    const next = document.querySelector('#next');
+    let current = 0;
+
+    function renderStage(index) {
+      current = (index + stages.length) % stages.length;
+      const stage = stages[current];
+      title.textContent = stage.title;
+      body.innerHTML = stage.body;
+      shape.textContent = stage.shape;
+      fact.textContent = stage.fact;
+      counter.textContent = `STAGE ${current + 1} OF ${stages.length}`;
+      buttons.forEach((button, i) => button.setAttribute('aria-selected', String(i === current)));
+      previous.disabled = current === 0;
+      next.textContent = current === stages.length - 1 ? 'Start again' : 'Next stage';
+    }
+
+    buttons.forEach((button) => button.addEventListener('click', () => renderStage(Number(button.dataset.stage))));
+    previous.addEventListener('click', () => renderStage(Math.max(0, current - 1)));
+    next.addEventListener('click', () => renderStage(current === stages.length - 1 ? 0 : current + 1));
+    renderStage(0);
+
+    const root = document.documentElement;
+    const themeButton = document.querySelector('.theme-toggle');
+    const storedTheme = localStorage.getItem('qwen-notes-theme');
+    if (storedTheme) root.dataset.theme = storedTheme;
+
+    function updateThemeLabel() {
+      themeButton.textContent = root.dataset.theme === 'dark' ? 'light mode' : 'dark mode';
+    }
+
+    themeButton.addEventListener('click', () => {
+      root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('qwen-notes-theme', root.dataset.theme);
+      updateThemeLabel();
+    });
+    updateThemeLabel();
+
+    const progress = document.querySelector('.progress');
+    function updateProgress() {
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      progress.style.width = `${max > 0 ? (window.scrollY / max) * 100 : 0}%`;
+    }
+    document.addEventListener('scroll', updateProgress, { passive: true });
+    updateProgress();
+  </script>
+</body>
+</html>

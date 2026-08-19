@@ -1,4 +1,21 @@
-# Transformer Explainer: Interactive Learning of Text-Generative Models
+# Qwen Transformer Explainer
+
+An expository fork of [Polo Club's Transformer Explainer](https://github.com/poloclub/transformer-explainer). The project is being adapted from GPT-2 to Qwen3-0.6B as a guided study of both transformer mathematics and practical inference.
+
+## Learning journey
+
+1. [One token at a time](static/learn/01-next-token.html) — the path from text to tokens, hidden states, logits, and a sampled choice
+
+Project decisions and session-to-session context live in [`scratchpad.md`](scratchpad.md). To run the original interactive GPT-2 explainer locally:
+
+```sh
+npm install
+npm run dev
+```
+
+The first install downloads JavaScript dependencies; opening the original explainer also loads its large browser-side ONNX model. The standalone learning chapters do not load that model.
+
+## Upstream project
 
 Transformer Explainer is an interactive visualization tool designed to help anyone learn how Transformer-based models like GPT work. It runs a live GPT-2 model right in your browser, allowing you to experiment with your own text and observe in real time how internal components and operations of the Transformer work together to predict the next tokens. Try Transformer Explainer at http://poloclub.github.io/transformer-explainer and watch a demo video on YouTube https://youtu.be/TFUc41G2ikY.<br/><br/>
 [![MIT license](http://img.shields.io/badge/license-MIT-brightgreen.svg)](http://opensource.org/licenses/MIT)
